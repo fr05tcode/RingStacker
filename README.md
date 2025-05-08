@@ -1,7 +1,7 @@
 # RingStacker
 
 A Tower of Hanoi puzzle game with a synthwave aesthetic.
-Play it here: https://yourusername.github.io/ringstacker/
+Play it here: https://fr05tcode.github.io/ringstacker/
 
 ## Features
 - Multiple rounds with increasing difficulty
