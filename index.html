@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RingStacker</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #231942 0%, #1a1a2e 100%);
+            font-family: 'Orbitron', Arial, sans-serif;
+            color: #f8f8ff;
+            padding-top: 20px;
+        }
+        .game-title {
+            font-size: 60px;
+            color: #00fff7;
+            text-shadow: 0 0 15px #008b8b, 0 0 70px #9d00ff;
+            margin-bottom: 20px;
+            font-weight: bold;
+            -webkit-text-stroke: 1px #008b8b;
+            text-stroke: 1px #008b8b;
+        }
+        canvas {
+            margin: 20px 0 40px 0;
+            display: block;
+        }
+        canvas.won {
+            animation: winGlow 2s ease-in forwards;
+        }
+        .controls {
+            margin-top: 20px;
+            text-align: center;
+            display: flex;
+            gap: 40px;
+            align-items: center;
+            font-size: 18px;
+            justify-content: center;
+            width: 100%;
+        }
+        .ring-controls {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        select {
+            padding: 5px 10px;
+            font-size: 18px;
+            border-radius: 4px;
+            border: none;
+            background: #231942;
+            color: #00fff7;
+            outline: none;
+            font-family: 'Orbitron', Arial, sans-serif;
+            cursor: pointer;
+            text-shadow: none;
+        }
+        select:hover {
+            background: #2a1f4d;
+            box-shadow: 0 0 15px #9d00ff;
+        }
+        select option {
+            background: #231942;
+            color: #00fff7;
+            font-family: 'Orbitron', Arial, sans-serif;
+        }
+        label {
+            font-size: 18px;
+            color: #9d00ff;
+            text-shadow: none;
+        }
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            font-size: 18px;
+            justify-content: center;
+            width: 100%;
+        }
+        #round span:first-child, #moves span:first-child, #timer span:first-child {
+            color: #9d00ff;
+            text-shadow: none;
+        }
+        #round span:last-child, #moves span:last-child, #timer span:last-child {
+            color: #00fff7;
+            text-shadow: none;
+        }
+        #timer {
+            min-width: 13ch;
+            text-align: left;
+            font-family: 'Orbitron', Arial, sans-serif;
+            font-variant-numeric: tabular-nums;
+        }
+        #minMoves {
+            color: #9d00ff;
+            text-shadow: none;
+        }
+        #minMoves:after {
+            content: attr(data-value);
+            color: #00fff7;
+            text-shadow: none;
+            margin-left: 5px;
+        }
+        .monospace {
+            font-family: 'Courier New', monospace;
+            font-variant-numeric: tabular-nums;
+        }
+        .button-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            justify-content: center;
+            width: 100%;
+        }
+        
+        .game-button {
+            padding: 5px 15px;
+            font-size: 16px;
+            border-radius: 4px;
+            background: #231942;
+            outline: none;
+            font-family: 'Orbitron', Arial, sans-serif;
+            cursor: pointer;
+            text-shadow: 0 0 2px #ff2fd6;
+            transition: all 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        #resetButton {
+            border: 2px solid #00fff7;
+            color: #00fff7;
+            box-shadow: 0 0 15px #9d00ff;
+        }
+        
+        #quitButton {
+            border: 2px solid #ff2fd6;
+            color: #ff2fd6;
+            box-shadow: 0 0 15px #9d00ff;
+        }
+        
+        .game-button.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        
+        #resetButton:hover {
+            box-shadow: 0 0 45px #9d00ff;
+            transform: translateY(-2px);
+        }
+        
+        #quitButton:hover {
+            box-shadow: 0 0 45px #ff2fd6;
+            transform: translateY(-2px);
+        }
+        #game {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #illegalMoveWarning {
+            position: absolute;
+            top: 33%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 80px;
+            color: #ff2fd6;
+            text-shadow: 0 0 10px #ff2fd6, 0 0 20px #ff2fd6;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
+            font-family: 'Orbitron', Arial, sans-serif;
+            font-weight: bold;
+            z-index: 1000;
+            -webkit-text-stroke: 2px #fff;
+            text-stroke: 2px #fff;
+            filter: drop-shadow(0 0 2px #9d00ff);
+            white-space: nowrap;
+        }
+        main {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        @keyframes winGlow {
+            0% {
+                box-shadow: 0 0 75px #ff2fd6, 0 0 150px #9d00ff;
+                border: none;
+            }
+            100% {
+                box-shadow: none;
+                border: none;
+            }
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css?family=Orbitron:700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <main>
+        <h1 class="game-title">RINGSTACKER</h1>
+        <div id="game">
+            <div id="illegalMoveWarning">ILLEGAL MOVE!</div>
+        </div>
+        <div class="button-container">
+            <button id="resetButton" class="game-button" onclick="initializeGame()">RESET ROUND</button>
+            <button id="quitButton" class="game-button" onclick="quitGame()">QUIT GAME</button>
+        </div>
+        <div class="stats">
+            <div id="round"><span>Round: </span><span>1</span></div>
+            <div id="moves"><span>Moves: </span><span>0</span></div>
+            <div id="timer"><span>Time: </span><span class="time-value">0:00.00</span></div>
+        </div>
+        <div class="controls">
+            <div class="ring-controls">
+                <label for="diskCount">Select Round:</label>
+                <select id="diskCount" onchange="changeDiskCount(this.value)">
+                    <option value="3">Round 1 (3 Rings)</option>
+                    <option value="4">Round 2 (4 Rings)</option>
+                    <option value="5">Round 3 (5 Rings)</option>
+                    <option value="6">Round 4 (6 Rings)</option>
+                    <option value="7">Round 5 (7 Rings)</option>
+                    <option value="8">Round 6 (8 Rings)</option>
+                </select>
+            </div>
+            <span id="minMoves" data-value="7">Minimum Moves:</span>
+        </div>
+    </main>
+    <script src="sketch.js"></script>
+</body>
+</html> 
