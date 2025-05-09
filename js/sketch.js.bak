@@ -1,0 +1,1906 @@
+// Game constants
+const POLE_COUNT = 3;
+const POLE_WIDTH = 20;
+const DISK_HEIGHT = 30;
+const BASE_WIDTH = 500; // Increased from 300 to 500 for more space
+const POLE_HEIGHT = 270; // Fixed height for 7 rings + 1 level above (reduced from 300)
+const MAX_ROUNDS = 6;    // Maximum number of rounds (increased to 6)
+const MAX_LEADERBOARD_ENTRIES = 5; // Maximum number of leaderboard entries
+
+// Sound effect
+const cheerSound = new Audio('cheer.mp3');
+
+// Neon synthwave color palette for disks
+const NEON_COLORS = [
+    '#00fff7', // cyan
+    '#ff2fd6', // magenta
+    '#9d00ff', // purple (was yellow)
+    '#00ff85', // green
+    '#ff6b00', // orange (was pink)
+    '#00b3ff', // blue
+    '#ff007f', // pink (was orange)
+    '#ffe600'  // yellow (was purple)
+];
+
+// Synthwave colors for poles and base
+const POLE_COLOR = '#4a4a6a'; // Changed from bright magenta to a more subtle purple-gray
+const BG_COLOR = '#1a1a2e';
+
+// Game state
+let poles = [];
+let selectedDisk = null;
+let selectedPole = null;
+let diskCount = 3;
+let moves = 0;
+let startTime = null;
+let gameStarted = false;
+let timerInterval = null;
+let gameWon = false;
+let warningTimeout = null;
+let totalMoves = 0;
+let totalTime = 0;
+let lastUpdateTime = null;
+let roundNumber = 1;  // Track the current round
+let leaderboard = [];  // Store leaderboard data
+let hasSeenInstructions = false; // Flag to track if player has seen instructions
+
+// Leaderboard functions
+function initLeaderboard() {
+    // Check if leaderboard exists in localStorage
+    if (localStorage.getItem('ringstacker_leaderboard')) {
+        leaderboard = JSON.parse(localStorage.getItem('ringstacker_leaderboard'));
+    } else {
+        // Initialize with example entries
+        leaderboard = [
+            {
+                player: 'ACE',
+                time: 180500, // 3:00.50
+                moves: 127
+            },
+            {
+                player: 'PRO',
+                time: 240750, // 4:00.75
+                moves: 156
+            },
+            {
+                player: 'NEW',
+                time: 360250, // 6:00.25
+                moves: 203
+            }
+        ];
+        saveLeaderboard();
+    }
+}
+
+function saveLeaderboard() {
+    localStorage.setItem('ringstacker_leaderboard', JSON.stringify(leaderboard));
+}
+
+function addToLeaderboard(initials, time) {
+    // Create new entry
+    const entry = {
+        player: initials.toUpperCase(),
+        time: time,
+        moves: totalMoves
+    };
+    
+    // Add entry to leaderboard
+    leaderboard.push(entry);
+    
+    // Sort by time (ascending)
+    leaderboard.sort((a, b) => a.time - b.time);
+    
+    // Keep only top MAX_LEADERBOARD_ENTRIES scores
+    if (leaderboard.length > MAX_LEADERBOARD_ENTRIES) {
+        leaderboard = leaderboard.slice(0, MAX_LEADERBOARD_ENTRIES);
+    }
+    
+    // Save to localStorage
+    saveLeaderboard();
+}
+
+function isLeaderboardQualifying(time) {
+    // If leaderboard isn't full yet, any score qualifies
+    if (leaderboard.length < MAX_LEADERBOARD_ENTRIES) {
+        return true;
+    }
+    
+    // Otherwise, check if time is better than the worst time
+    return time < leaderboard[leaderboard.length - 1].time;
+}
+
+function updateLeaderboardDisplay() {
+    const leaderboardElement = document.getElementById('leaderboard');
+    const leaderboardData = document.getElementById('leaderboard-data');
+    
+    // Clear current leaderboard display
+    leaderboardData.innerHTML = '';
+    
+    // Check if leaderboard is empty
+    if (leaderboard.length === 0) {
+        const emptyRow = document.createElement('tr');
+        const emptyCell = document.createElement('td');
+        emptyCell.colSpan = 4; // Updated to span 4 columns
+        emptyCell.textContent = 'No records yet!';
+        emptyCell.style.padding = '20px 0';
+        emptyCell.style.color = '#00fff7';
+        emptyRow.appendChild(emptyCell);
+        leaderboardData.appendChild(emptyRow);
+    } else {
+        // Populate with leaderboard data
+        leaderboard.forEach((entry, index) => {
+            const row = document.createElement('tr');
+            
+            const rankCell = document.createElement('td');
+            rankCell.textContent = index + 1;
+            
+            const playerCell = document.createElement('td');
+            playerCell.textContent = entry.player;
+            
+            const timeCell = document.createElement('td');
+            timeCell.textContent = formatTime(entry.time);
+            
+            const movesCell = document.createElement('td');
+            movesCell.textContent = entry.moves || '-'; // Display '-' if moves not available
+            
+            row.appendChild(rankCell);
+            row.appendChild(playerCell);
+            row.appendChild(timeCell);
+            row.appendChild(movesCell);
+            
+            // Highlight current score if it exists in the leaderboard
+            if (entry.time === totalTime && entry.moves === totalMoves) {
+                row.style.backgroundColor = 'rgba(157, 0, 255, 0.3)';
+                row.style.borderRadius = '4px';
+            }
+            
+            leaderboardData.appendChild(row);
+        });
+    }
+    
+    // Make leaderboard visible
+    leaderboardElement.classList.remove('hidden');
+}
+
+function hideLeaderboard() {
+    const leaderboardElement = document.getElementById('leaderboard');
+    leaderboardElement.classList.add('hidden');
+}
+
+// Setup border watcher to continually check for and remove any page edge borders
+function setupBorderWatcher() {
+    // Remove any borders from all elements that could be causing the issue
+    function checkAndRemoveBorders() {
+        // First check if we have any active dialogs
+        const activeDialogs = document.querySelectorAll('#gameDialog, #initialsDialog, #gameCompleteDialog, [data-dialog-type="game-dialog"]');
+        const hasActiveDialog = activeDialogs.length > 0;
+        
+        // Check all elements with borders
+        const allElements = document.querySelectorAll('*');
+        allElements.forEach(el => {
+            // Skip elements that should keep their borders
+            if (el.tagName.toLowerCase() === 'canvas') return;
+            if (el.id === 'defaultCanvas0') return;
+            if (el.classList && el.classList.contains('p5Canvas')) return;
+            if (el.tagName.toLowerCase() === 'button') return;
+            if (el.classList.contains('game-button')) return;
+            if (el.id === 'nextRoundBtn') return;
+            if (el.id === 'gameDialog') return;
+            if (el.id === 'initialsDialog') return;
+            if (el.id === 'gameCompleteDialog') return;
+            if (el.classList.contains('leaderboard')) return;
+            // Also skip any dialog-related elements
+            if (el.id && el.id.includes('Dialog')) return;
+            if (el.hasAttribute('data-dialog-type')) return;
+            if (el.parentElement && el.parentElement.id && el.parentElement.id.includes('Dialog')) return;
+            if (el.tagName.toLowerCase() === 'table' || 
+                el.tagName.toLowerCase() === 'tr' ||
+                el.tagName.toLowerCase() === 'td' ||
+                el.tagName.toLowerCase() === 'th') return;
+            
+            // Specifically examine elements near the edges of the window
+            const rect = el.getBoundingClientRect();
+            const isAtEdge = (
+                rect.left <= 5 || 
+                rect.top <= 5 || 
+                rect.right >= window.innerWidth - 5 || 
+                rect.bottom >= window.innerHeight - 5
+            );
+            
+            if (isAtEdge) {
+                el.style.border = 'none';
+                el.style.borderWidth = '0';
+                el.style.boxShadow = 'none';
+                el.style.outline = 'none';
+            }
+        });
+        
+        // Ensure canvas always has border even after edge border removal
+        const canvas = document.querySelector('canvas');
+        if (canvas) {
+            canvas.style.border = '3px solid #00fff7';
+            canvas.style.borderRadius = '12px';
+            canvas.style.boxShadow = '0 0 30px #9d00ff';
+        }
+        
+        // If we have active dialogs, ensure their styling is preserved
+        if (hasActiveDialog) {
+            activeDialogs.forEach(dialog => {
+                enforceDialogStyling(dialog);
+            });
+        }
+    }
+    
+    // Run immediately and then on an interval
+    checkAndRemoveBorders();
+    return setInterval(checkAndRemoveBorders, 1000); // Check every second
+}
+
+// Setup a MutationObserver to monitor dialog elements
+function setupDialogStyleObserver() {
+    // Create a new observer
+    const observer = new MutationObserver((mutations) => {
+        // Look for any dialogs that might have had styling removed
+        const dialogs = document.querySelectorAll('#gameDialog, #initialsDialog, #gameCompleteDialog, [data-dialog-type="game-dialog"]');
+        
+        dialogs.forEach(dialog => {
+            // Check if the dialog has lost its styling
+            const computedStyle = window.getComputedStyle(dialog);
+            if (computedStyle.backgroundColor === 'rgba(0, 0, 0, 0)' || 
+                computedStyle.borderWidth === '0px' ||
+                computedStyle.border === 'none') {
+                enforceDialogStyling(dialog);
+            }
+        });
+    });
+    
+    // Observe the game container for changes
+    const gameContainer = document.getElementById('game');
+    if (gameContainer) {
+        observer.observe(gameContainer, { 
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style', 'class'] 
+        });
+    }
+}
+
+function setup() {
+    let canvas = createCanvas(800, 400);
+    canvas.parent('game');
+    
+    // Make sure the p5 canvas container doesn't have borders
+    if (canvas.elt && canvas.elt.parentElement) {
+        canvas.elt.parentElement.style.border = 'none';
+        canvas.elt.parentElement.style.boxShadow = 'none';
+        canvas.elt.parentElement.style.outline = 'none';
+        canvas.elt.parentElement.style.background = 'none';
+    }
+    
+    // Apply strong border styling to the canvas itself
+    if (canvas.elt) {
+        canvas.elt.style.border = '3px solid #00fff7';
+        canvas.elt.style.borderRadius = '12px';
+        canvas.elt.style.boxShadow = '0 0 30px #9d00ff';
+    }
+    
+    // Remove any borders from the game container and its parents
+    removeContainerBorders();
+    
+    // Set up the border watcher to continually check for and remove any border at edge of page
+    setupBorderWatcher();
+    
+    // Set up the dialog style observer
+    setupDialogStyleObserver();
+    
+    // Initial styling is now handled by CSS
+    initializeGame();
+    setupButtons(); // Add button setup here
+    
+    // Initialize leaderboard
+    initLeaderboard();
+    
+    // Update the leaderboard display on startup
+    updateLeaderboardDisplay();
+}
+
+// Function to remove any borders from containers
+function removeContainerBorders() {
+    
+    // Check if there's any active dialog that we need to preserve
+    const activeDialogs = document.querySelectorAll('#gameDialog, #initialsDialog, #gameCompleteDialog, [data-dialog-type="game-dialog"]');
+    const hasActiveDialog = activeDialogs.length > 0;
+    
+    if (hasActiveDialog) {
+    }
+    
+    // Target the game container
+    const gameContainer = document.getElementById('game');
+    if (gameContainer) {
+        gameContainer.style.border = 'none';
+        gameContainer.style.boxShadow = 'none';
+        gameContainer.style.outline = 'none';
+        
+        // Also target any parent containers up to body
+        let parent = gameContainer.parentElement;
+        while (parent && parent !== document.body) {
+            parent.style.border = 'none';
+            parent.style.boxShadow = 'none';
+            parent.style.outline = 'none';
+            parent = parent.parentElement;
+        }
+        
+        // Also target all direct children except canvas and buttons
+        const children = gameContainer.children;
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            // Skip elements that should keep their styling
+            if (child.tagName.toLowerCase() === 'canvas') continue;
+            if (child.id === 'defaultCanvas0') continue;
+            if (child.tagName.toLowerCase() === 'button') continue;
+            if (child.classList.contains('game-button')) continue;
+            if (child.id === 'nextRoundBtn') continue;
+            if (child.id === 'gameDialog') continue; 
+            if (child.id === 'initialsDialog') continue;
+            if (child.id === 'gameCompleteDialog') continue;
+            // Also skip dialog-related elements
+            if (child.id && child.id.includes('Dialog')) continue;
+            if (child.hasAttribute('data-dialog-type')) continue;
+            
+            // Remove borders from container elements
+            child.style.border = 'none';
+            child.style.boxShadow = 'none';
+            child.style.outline = 'none';
+        }
+    }
+    
+    // Also ensure body and main have no borders
+    document.body.style.border = 'none';
+    const mainElement = document.querySelector('main');
+    if (mainElement) {
+        mainElement.style.border = 'none';
+        mainElement.style.boxShadow = 'none';
+        mainElement.style.outline = 'none';
+    }
+    
+    // Apply strong styling to canvas - ensure it always has a border
+    const canvas = document.querySelector('canvas');
+    if (canvas) {
+        canvas.style.border = '3px solid #00fff7';
+        canvas.style.borderRadius = '12px';
+        canvas.style.boxShadow = '0 0 30px #9d00ff';
+    }
+    
+    // If we have active dialogs, make sure they still have their styling
+    if (hasActiveDialog) {
+        activeDialogs.forEach(dialog => {
+            enforceDialogStyling(dialog);
+        });
+    }
+}
+
+function calculateMinMoves() {
+    return Math.pow(2, diskCount) - 1;
+}
+
+function initializeGame() {
+    // Efficient reset of game state with minimum operations
+    poles = [[], [], []];
+    
+    // Set up initial disk arrangement only once
+    for (let i = diskCount; i > 0; i--) {
+        poles[0].push(i);
+    }
+    
+    moves = 0;
+    gameStarted = false;
+    gameWon = false;
+    
+    // Calculate minimum moves once
+    const minMoves = Math.pow(2, diskCount) - 1;
+    document.getElementById('minMoves').setAttribute('data-value', minMoves);
+    
+    // Update round display
+    document.querySelector('#round span:last-child').textContent = roundNumber;
+    
+    // Reset timer if it was previously set
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+    
+    // Reset move counter
+    document.querySelector('#moves span:last-child').textContent = '0';
+    
+    // Only reset the timer display if we're starting from scratch
+    if (startTime === null) {
+        document.querySelector('#timer .time-value').textContent = '0:00.00';
+        totalTime = 0;
+    }
+    
+    // Get DOM elements once
+    const resetButton = document.getElementById('resetButton');
+    const quitButton = document.getElementById('quitButton');
+    const instructionText = document.getElementById('instructionText');
+    
+    if (resetButton && quitButton && instructionText) {
+        // Only show instructions on first round if they haven't been seen before
+        instructionText.style.opacity = roundNumber === 1 && !hasSeenInstructions ? '1' : '0';
+        
+        // Hide buttons until first move - set both properties at once
+        resetButton.style.cssText = 'opacity: 0; display: block; pointer-events: auto;';
+        quitButton.style.cssText = 'opacity: 0; display: block; pointer-events: auto;';
+    }
+}
+
+function updateStats() {
+    document.querySelector('#moves span:last-child').textContent = moves;
+    document.getElementById('minMoves').setAttribute('data-value', calculateMinMoves());
+    if (startTime) {
+        let elapsed = Date.now() - startTime;
+        let milliseconds = elapsed % 1000;
+        let totalSeconds = Math.floor(elapsed / 1000);
+        let minutes = Math.floor(totalSeconds / 60);
+        let seconds = totalSeconds % 60;
+        let smoothDecimals = (milliseconds / 1000).toFixed(2).substring(2);
+        document.querySelector('#timer .time-value').textContent = 
+            `${minutes}:${seconds.toString().padStart(2, '0')}.${smoothDecimals}`;
+    } else {
+        document.querySelector('#timer .time-value').textContent = '0:00.00';
+    }
+}
+
+function checkWin() {
+    // Check if all disks are on the last pole
+    if (poles[POLE_COUNT - 1].length === diskCount) {
+        // Verify the disks are in correct order
+        for (let i = 0; i < diskCount; i++) {
+            if (poles[POLE_COUNT - 1][i] !== diskCount - i) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+function celebrateWin() {
+    if (gameWon) return;
+    gameWon = true;
+    
+    // Update total moves
+    totalMoves += moves;
+    
+    // Calculate total time at the moment of completion
+    let finalTime = Date.now() - startTime;
+    totalTime = finalTime;
+    
+    // Stop the timer when the round is completed
+    // It will be restarted on the first move of the next round
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    // Ensure no borders are visible on any containers
+    removeContainerBorders();
+    
+    // Play cheer sound
+    cheerSound.currentTime = 0;
+
+    // Fade out the game buttons over 0.5 seconds (reduced from 1s)
+    document.getElementById('resetButton').style.transition = 'opacity 0.5s ease';
+    document.getElementById('quitButton').style.transition = 'opacity 0.5s ease';
+    document.getElementById('resetButton').style.opacity = '0';
+    document.getElementById('quitButton').style.opacity = '0';
+    
+    // Disable pointer events for buttons during the fadeout
+    document.getElementById('resetButton').style.pointerEvents = 'none';
+    document.getElementById('quitButton').style.pointerEvents = 'none';
+
+    // Single burst confetti celebration
+    const defaults = { 
+        startVelocity: 100,
+        spread: 360, 
+        ticks: 120,
+        zIndex: 0,
+        gravity: 4
+    };
+
+    // Left spray - straight up
+    confetti({
+        ...defaults,
+        particleCount: 1500,
+        origin: { x: 0.02, y: 0.95 },
+        angle: 90,
+        spread: 90,
+        colors: NEON_COLORS
+    });
+
+    // Center spray - straight up
+    confetti({
+        ...defaults,
+        particleCount: 1500,
+        origin: { x: 0.5, y: 0.95 },
+        angle: 90,
+        spread: 90,
+        colors: NEON_COLORS
+    });
+    
+    // Right spray - straight up
+    confetti({
+        ...defaults,
+        particleCount: 1500,
+        origin: { x: 0.98, y: 0.95 },
+        angle: 90,
+        spread: 90,
+        colors: NEON_COLORS
+    });
+    
+    // Create a "next round" button if not on last round
+    if (roundNumber < MAX_ROUNDS) {
+        // Wait for confetti to finish before showing next round button
+        setTimeout(() => {
+            // Create styled in-game button for next round
+            const nextRoundBtn = document.createElement('button');
+            nextRoundBtn.id = 'nextRoundBtn';
+            nextRoundBtn.textContent = 'NEXT ROUND';
+            
+            // Styling for next round button
+            nextRoundBtn.style.position = 'absolute';
+            nextRoundBtn.style.top = '50%';
+            nextRoundBtn.style.left = '50%';
+            nextRoundBtn.style.transform = 'translate(-50%, -50%)';
+            nextRoundBtn.style.padding = '15px 30px';
+            nextRoundBtn.style.fontSize = '28px';
+            nextRoundBtn.style.fontFamily = 'Orbitron, Arial, sans-serif';
+            nextRoundBtn.style.borderRadius = '12px';
+            nextRoundBtn.style.border = '2px solid #00fff7';
+            nextRoundBtn.style.outline = 'none';
+            nextRoundBtn.style.background = 'rgba(35, 25, 66, 0.9)';
+            nextRoundBtn.style.color = '#00fff7';
+            nextRoundBtn.style.cursor = 'pointer';
+            nextRoundBtn.style.boxShadow = '0 0 30px #9d00ff';
+            nextRoundBtn.style.zIndex = '999';
+            nextRoundBtn.style.opacity = '0';
+            nextRoundBtn.style.transition = 'opacity 1s ease, transform 0.3s ease';
+            
+            // Add hover effect
+            nextRoundBtn.onmouseover = function() {
+                this.style.boxShadow = '0 0 45px #00fff7';
+                this.style.transform = 'translate(-50%, -50%)';
+            };
+            nextRoundBtn.onmouseout = function() {
+                this.style.boxShadow = '0 0 30px #9d00ff';
+                this.style.transform = 'translate(-50%, -50%)';
+            };
+            
+            // Set click handler to start next round
+            nextRoundBtn.onclick = startNextRound;
+            
+            // Add to DOM
+            document.getElementById('game').appendChild(nextRoundBtn);
+            
+            // Trigger fade-in after a small delay
+            setTimeout(() => {
+                nextRoundBtn.style.opacity = '1';
+            }, 50);
+        }, 2000);
+    } else {
+        // This is the final round, show game complete dialog after a short delay
+        setTimeout(() => {
+            // Check if the player qualifies for the leaderboard
+            if (isLeaderboardQualifying(totalTime)) {
+                // Show initials prompt
+                showInitialsPrompt(totalTime);
+            } else {
+                // Show completion dialog without leaderboard entry
+                showGameCompleteDialog();
+            }
+        }, 2000);
+    }
+}
+
+function startNextRound() {
+    // Update game state for next round
+    totalMoves += moves;
+    roundNumber++;
+    
+    // Remove the next round button
+    let nextRoundBtn = document.getElementById('nextRoundBtn');
+    if (nextRoundBtn) {
+        nextRoundBtn.remove();
+    }
+    
+    // Progress by increasing disk count (3 to 8 rings across 6 rounds)
+    // Round 1: 3 rings
+    // Round 2: 4 rings
+    // Round 3: 5 rings
+    // Round 4: 6 rings
+    // Round 5: 7 rings
+    // Round 6: 8 rings
+    diskCount = 2 + roundNumber; // This formula ensures proper progression
+    
+    // Reset canvas and get ready for next round
+    // No need to restore borders since we're not modifying them
+    
+    // Reset game state for next round but preserve time
+    for (let i = 0; i < 3; i++) {
+        poles[i] = [];
+    }
+    for (let i = diskCount; i > 0; i--) {
+        poles[0].push(i);
+    }
+    moves = 0;
+    gameStarted = false;  // Reset gameStarted flag so timer starts on first move
+    gameWon = false;
+    
+    // Calculate minimum moves
+    let minMoves = Math.pow(2, diskCount) - 1;
+    document.getElementById('minMoves').setAttribute('data-value', minMoves);
+    
+    // Update round display
+    document.querySelector('#round span:last-child').textContent = roundNumber;
+    
+    // Reset move counter
+    document.querySelector('#moves span:last-child').textContent = '0';
+    
+    // Reset instructions and buttons for new round
+    let resetButton = document.getElementById('resetButton');
+    let quitButton = document.getElementById('quitButton');
+    let instructionText = document.getElementById('instructionText');
+    
+    if (instructionText) {
+        // Always hide instructions on subsequent rounds
+        instructionText.style.opacity = '0';
+    }
+    
+    resetButton.style.opacity = '0';
+    quitButton.style.opacity = '0';
+    resetButton.style.pointerEvents = 'auto'; // Re-enable pointer events
+    quitButton.style.pointerEvents = 'auto'; // Re-enable pointer events
+    
+    // Ensure buttons are set up
+    setupButtons();
+    
+    // DO NOT start the timer here - it will start on first move of the new round
+}
+
+function showIllegalMoveWarning() {
+    const warning = document.getElementById('illegalMoveWarning');
+    warning.style.opacity = '1';
+    
+    // Clear any existing timeout
+    if (warningTimeout) {
+        clearTimeout(warningTimeout);
+    }
+    
+    // Hide the warning after 1 second
+    warningTimeout = setTimeout(() => {
+        warning.style.opacity = '0';
+    }, 1000);
+}
+
+// Function to ensure the canvas maintains its border styling
+function ensureCanvasBorder() {
+    const canvas = document.querySelector('canvas');
+    if (canvas) {
+        canvas.style.border = '3px solid #00fff7';
+        canvas.style.borderRadius = '12px';
+        canvas.style.boxShadow = '0 0 30px #9d00ff';
+    }
+}
+
+function draw() {
+    background(BG_COLOR);
+    noStroke();
+    
+    // Ensure canvas border is maintained
+    ensureCanvasBorder();
+    
+    // Update timer if game is in progress
+    if (gameStarted && !gameWon) {
+        updateStats();
+    }
+    
+    // Center the game
+    const centerX = width/2;
+    const totalWidth = BASE_WIDTH; // Use BASE_WIDTH for total game width
+    const poleSpacing = totalWidth/2; // Space between poles
+    const leftmostX = centerX - totalWidth/2; // Starting X position
+    translate(leftmostX, 50); // Translate to left edge of game area
+    
+    // Draw poles
+    for (let i = 0; i < POLE_COUNT; i++) {
+        let x = i * poleSpacing; // Position each pole
+        drawingContext.fillStyle = POLE_COLOR;
+        fill(POLE_COLOR);
+        
+        // Apply uniform shadow to all poles (no special glow for winning pole)
+        drawingContext.shadowBlur = 3;
+        drawingContext.shadowColor = POLE_COLOR;
+        
+        rect(x - POLE_WIDTH/2, 0, POLE_WIDTH, POLE_HEIGHT, 10);
+        drawingContext.shadowBlur = 0;
+        
+        // Draw disks
+        for (let j = 0; j < poles[i].length; j++) {
+            let diskIndex = poles[i][j] - 1;
+            let diskWidth = 48 * Math.pow(1.25, diskIndex);
+            let y = POLE_HEIGHT - (j + 1) * DISK_HEIGHT;
+            let neonColor = NEON_COLORS[diskIndex % NEON_COLORS.length];
+            
+            // Create gradient for disk
+            let gradient = drawingContext.createRadialGradient(
+                x, y + DISK_HEIGHT/2, 0,
+                x, y + DISK_HEIGHT/2, diskWidth/2
+            );
+            
+            // Convert hex to RGB for gradient manipulation
+            let r = parseInt(neonColor.slice(1,3), 16);
+            let g = parseInt(neonColor.slice(3,5), 16);
+            let b = parseInt(neonColor.slice(5,7), 16);
+            
+            // Add gradient color stops
+            gradient.addColorStop(0, `rgb(${r + 40}, ${g + 40}, ${b + 40})`); // Lighter center
+            gradient.addColorStop(0.7, neonColor); // Original color
+            gradient.addColorStop(1, `rgb(${Math.max(0, r - 75)}, ${Math.max(0, g - 75)}, ${Math.max(0, b - 75)})`); // Darker edge
+            
+            // Apply gradient
+            drawingContext.fillStyle = gradient;
+            stroke('#2a2a3a');
+            strokeWeight(1.0);
+            
+            rect(x - diskWidth/2, y, diskWidth, DISK_HEIGHT, 11);
+            drawingContext.shadowBlur = 0;
+            noStroke();
+        }
+    }
+    
+    // Draw selected disk if any
+    if (selectedDisk) {
+        let x = mouseX - leftmostX;
+        let y = mouseY - 50;
+        let diskIndex = selectedDisk - 1;
+        let diskWidth = 48 * Math.pow(1.25, diskIndex);
+        let neonColor = NEON_COLORS[diskIndex % NEON_COLORS.length];
+        
+        // Create gradient for selected disk
+        let gradient = drawingContext.createRadialGradient(
+            x, y + DISK_HEIGHT/2, 0,
+            x, y + DISK_HEIGHT/2, diskWidth/2
+        );
+        
+        // Convert hex to RGB for gradient manipulation
+        let r = parseInt(neonColor.slice(1,3), 16);
+        let g = parseInt(neonColor.slice(3,5), 16);
+        let b = parseInt(neonColor.slice(5,7), 16);
+        
+        // Add gradient color stops
+        gradient.addColorStop(0, `rgb(${r + 40}, ${g + 40}, ${b + 40})`); // Lighter center
+        gradient.addColorStop(0.7, neonColor); // Original color
+        gradient.addColorStop(1, `rgb(${Math.max(0, r - 75)}, ${Math.max(0, g - 75)}, ${Math.max(0, b - 75)})`); // Darker edge
+        
+        // Apply gradient
+        drawingContext.fillStyle = gradient;
+        stroke('#2a2a3a');
+        strokeWeight(1.0);
+        rect(x - diskWidth/2, y - DISK_HEIGHT/2, diskWidth, DISK_HEIGHT, 11);
+        noStroke();
+    }
+
+    // Check for win condition
+    if (!gameWon && checkWin()) {
+        celebrateWin();
+    }
+}
+
+function mousePressed() {
+    if (gameWon) return; // Prevent moves after winning
+    
+    const centerX = width/2;
+    const totalWidth = BASE_WIDTH;
+    const poleSpacing = totalWidth/2;
+    const leftmostX = centerX - totalWidth/2;
+    
+    for (let i = 0; i < POLE_COUNT; i++) {
+        if (poles[i].length > 0) {
+            let x = i * poleSpacing + leftmostX;
+            let topDisk = poles[i][poles[i].length - 1];
+            let diskWidth = 48 * Math.pow(1.25, topDisk - 1); // Increased from 44 to 48 (another 10% increase)
+            let y = POLE_HEIGHT - poles[i].length * DISK_HEIGHT + 50;
+            
+            if (mouseX > x - diskWidth/2 && mouseX < x + diskWidth/2 &&
+                mouseY > y && mouseY < y + DISK_HEIGHT) {
+                selectedDisk = poles[i].pop();
+                selectedPole = i;
+                break;
+            }
+        }
+    }
+}
+
+function mouseReleased() {
+    // Prevent interaction if the game is won
+    if (gameWon) return;
+    
+    if (selectedDisk) {
+        const centerX = width/2;
+        const totalWidth = BASE_WIDTH;
+        const poleSpacing = totalWidth/2;
+        const leftmostX = centerX - totalWidth/2;
+        
+        let closestPole = 0;
+        let minDist = Infinity;
+        
+        for (let i = 0; i < POLE_COUNT; i++) {
+            let x = i * poleSpacing + leftmostX;
+            let dist = abs(mouseX - x);
+            if (dist < minDist) {
+                minDist = dist;
+                closestPole = i;
+            }
+        }
+        
+        if (poles[closestPole].length === 0 || 
+            selectedDisk < poles[closestPole][poles[closestPole].length - 1]) {
+            poles[closestPole].push(selectedDisk);
+            moves++;
+            
+            // Start timer on first move of each round
+            if (!gameStarted) {
+                gameStarted = true;
+                
+                // Only initialize startTime if it hasn't been set (first round)
+                if (startTime === null) {
+                    startTime = Date.now();
+                }
+                
+                // Initialize lastUpdateTime for proper time calculation
+                lastUpdateTime = Date.now();
+                
+                // Start the timer interval for this round
+                timerInterval = setInterval(updateTimer, 10);
+                
+                // Set up buttons to initially be hidden
+                let resetButton = document.getElementById('resetButton');
+                let quitButton = document.getElementById('quitButton');
+                let instructionText = document.getElementById('instructionText');
+                
+                // Mark that the player has seen the instructions
+                hasSeenInstructions = true;
+                
+                // Hide instructions
+                instructionText.style.opacity = '0';
+                instructionText.style.pointerEvents = 'none';
+                
+                // Add transition for smooth fade-in over 1 second (reduced from 1.5s)
+                resetButton.style.transition = 'opacity 1s ease';
+                quitButton.style.transition = 'opacity 1s ease';
+                
+                // Make sure the buttons are visible to receive mouse events
+                resetButton.style.display = 'block';
+                quitButton.style.display = 'block';
+                
+                // Trigger the fade-in
+                resetButton.style.opacity = '1';
+                quitButton.style.opacity = '1';
+            }
+            
+            updateStats();
+        } else {
+            poles[selectedPole].push(selectedDisk);
+            showIllegalMoveWarning();
+        }
+        
+        selectedDisk = null;
+        selectedPole = null;
+    }
+}
+
+function changeDiskCount(count) {
+    // Convert the count to an integer
+    count = parseInt(count);
+    
+    // Update both the diskCount and the round number
+    diskCount = count;
+    roundNumber = count - 2; // Since round formula was diskCount = 2 + roundNumber
+    
+    // Reset startTime when changing disk count to ensure timer doesn't start automatically
+    startTime = null;
+    totalTime = 0;
+    moves = 0;
+    totalMoves = 0;
+    
+    // Reset game state
+    initializeGame();
+    
+    // Update the round display explicitly
+    document.querySelector('#round span:last-child').textContent = roundNumber;
+}
+
+// Optimized utility function to ensure dialog styling
+function enforceDialogStyling(dialog) {
+    // Set essential styling only - reduced properties
+    const essentialStyles = `
+        position: absolute !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        padding: 30px !important;
+        border-radius: 12px !important;
+        border: 3px solid #00fff7 !important;
+        background-color: rgba(35, 25, 66, 0.95) !important;
+        color: #00fff7 !important;
+        box-shadow: 0 0 30px #9d00ff !important;
+        z-index: 2500 !important;
+        display: block !important;
+        visibility: visible !important;
+    `;
+    
+    // Apply styles directly
+    dialog.style.cssText = essentialStyles;
+    
+    // Add data attribute for CSS targeting
+    dialog.setAttribute('data-dialog-type', 'game-dialog');
+    
+    // Skip DOM check - rely on caller to ensure dialog is in DOM
+    if (dialog.id) {
+    }
+}
+
+function quitGame() {
+    
+    // Immediately reset gameStarted flag to prevent timer updates
+    gameStarted = false;
+    
+    // Restore canvas styling from winning state if needed
+    // No need to restore borders since we're not modifying them
+    
+    // Stop the timer when quitting the game
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+    
+    // Make sure the lastUpdateTime is null to prevent timer from continuing
+    lastUpdateTime = null;
+    // Set startTime to null to prevent any further elapsed time calculations
+    startTime = null;
+    
+    // Update total moves
+    totalMoves += moves;
+    let timeStr = formatTime(totalTime);
+    
+    // Fade out the game buttons immediately
+    let resetButton = document.getElementById('resetButton');
+    let quitButton = document.getElementById('quitButton');
+    resetButton.style.transition = 'opacity 0.5s ease';
+    quitButton.style.transition = 'opacity 0.5s ease';
+    resetButton.style.opacity = '0';
+    quitButton.style.opacity = '0';
+    resetButton.style.pointerEvents = 'none';
+    quitButton.style.pointerEvents = 'none';
+    
+    // Create styled in-game dialog instead of alert
+    const gameDialog = document.createElement('div');
+    gameDialog.id = 'gameDialog';
+    
+    // Set direct styling inline with !important flags
+    gameDialog.style.cssText = `
+        position: absolute !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        padding: 30px !important;
+        border-radius: 12px !important;
+        border: 3px solid #00fff7 !important;
+        background-color: rgba(35, 25, 66, 0.95) !important;
+        color: #00fff7 !important;
+        font-family: 'Orbitron', Arial, sans-serif !important;
+        box-shadow: 0 0 20px #9d00ff !important;
+        z-index: 2500 !important;
+        text-align: center !important;
+        min-width: 320px !important;
+        opacity: 0 !important;
+        transition: opacity 0.5s ease !important;
+        display: block !important;
+        visibility: visible !important;
+    `;
+    
+    // Apply the CSS class for dialog styling
+    gameDialog.classList.add('game-dialog-styling');
+    
+    // Create dialog content with game summary
+    const title = document.createElement('h2');
+    title.textContent = 'Better luck next time!';
+    title.style.color = '#ff2fd6';
+    title.style.textShadow = 'none'; // Remove glow effect
+    title.style.marginTop = '0';
+    title.style.fontSize = '28px'; // Make text larger
+    
+    const statsContainer = document.createElement('div');
+    statsContainer.style.margin = '20px 0';
+    statsContainer.style.textAlign = 'left';
+    
+    const createStatRow = (label, value) => {
+        const row = document.createElement('div');
+        row.style.margin = '12px 0';
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = label;
+        labelSpan.style.color = '#ff2fd6';
+        
+        const valueSpan = document.createElement('span');
+        valueSpan.textContent = value;
+        valueSpan.style.color = '#00fff7';
+        valueSpan.style.textShadow = 'none'; // Remove text shadow
+        
+        row.appendChild(labelSpan);
+        row.appendChild(valueSpan);
+        return row;
+    };
+    
+    statsContainer.appendChild(createStatRow('Total Rounds:', roundNumber));
+    statsContainer.appendChild(createStatRow('Total Moves:', totalMoves));
+    statsContainer.appendChild(createStatRow('Total Time:', timeStr));
+    
+    // Add leaderboard section title
+    const leaderboardTitle = document.createElement('h3');
+    leaderboardTitle.textContent = 'LEADERBOARD';
+    leaderboardTitle.style.color = '#ff2fd6';
+    leaderboardTitle.style.marginTop = '25px';
+    leaderboardTitle.style.fontSize = '20px';
+    
+    // Add leaderboard table
+    const leaderboardContainer = document.createElement('div');
+    leaderboardContainer.style.maxHeight = '150px';
+    leaderboardContainer.style.overflowY = 'auto';
+    leaderboardContainer.style.margin = '15px 0';
+    leaderboardContainer.style.padding = '0 10px';
+    
+    const leaderboardTable = document.createElement('table');
+    leaderboardTable.style.width = '100%';
+    leaderboardTable.style.borderCollapse = 'collapse';
+    leaderboardTable.style.fontVariantNumeric = 'tabular-nums';
+    
+    // Add table header
+    const tableHeader = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    
+    const rankHeader = document.createElement('th');
+    rankHeader.textContent = 'RANK';
+    rankHeader.style.color = '#9d00ff';
+    rankHeader.style.padding = '8px';
+    
+    const playerHeader = document.createElement('th');
+    playerHeader.textContent = 'PLAYER';
+    playerHeader.style.color = '#9d00ff';
+    playerHeader.style.padding = '8px';
+    
+    const timeHeader = document.createElement('th');
+    timeHeader.textContent = 'TIME';
+    timeHeader.style.color = '#9d00ff';
+    timeHeader.style.padding = '8px';
+    
+    const movesHeader = document.createElement('th');
+    movesHeader.textContent = 'MOVES';
+    movesHeader.style.color = '#9d00ff';
+    movesHeader.style.padding = '8px';
+    
+    headerRow.appendChild(rankHeader);
+    headerRow.appendChild(playerHeader);
+    headerRow.appendChild(timeHeader);
+    headerRow.appendChild(movesHeader);
+    tableHeader.appendChild(headerRow);
+    leaderboardTable.appendChild(tableHeader);
+    
+    // Add table body
+    const tableBody = document.createElement('tbody');
+    
+    // Check if leaderboard is empty
+    if (leaderboard.length === 0) {
+        const emptyRow = document.createElement('tr');
+        const emptyCell = document.createElement('td');
+        emptyCell.colSpan = 4; // Updated to span 4 columns
+        emptyCell.textContent = 'No records yet!';
+        emptyCell.style.padding = '15px 0';
+        emptyCell.style.color = '#00fff7';
+        emptyRow.appendChild(emptyCell);
+        tableBody.appendChild(emptyRow);
+    } else {
+        // Populate with leaderboard data
+        leaderboard.forEach((entry, index) => {
+            const row = document.createElement('tr');
+            
+            const rankCell = document.createElement('td');
+            rankCell.textContent = index + 1;
+            rankCell.style.padding = '8px';
+            rankCell.style.color = '#00fff7';
+            
+            const playerCell = document.createElement('td');
+            playerCell.textContent = entry.player;
+            playerCell.style.padding = '8px';
+            playerCell.style.color = '#00fff7';
+            
+            const timeCell = document.createElement('td');
+            timeCell.textContent = formatTime(entry.time);
+            timeCell.style.padding = '8px';
+            timeCell.style.color = '#00fff7';
+            
+            const movesCell = document.createElement('td');
+            movesCell.textContent = entry.moves || '-';
+            movesCell.style.padding = '8px';
+            movesCell.style.color = '#00fff7';
+            
+            row.appendChild(rankCell);
+            row.appendChild(playerCell);
+            row.appendChild(timeCell);
+            row.appendChild(movesCell);
+            
+            // Highlight current score if it exists in the leaderboard
+            if (entry.time === totalTime && entry.moves === totalMoves) {
+                row.style.backgroundColor = 'rgba(157, 0, 255, 0.3)';
+                row.style.borderRadius = '4px';
+            }
+            
+            tableBody.appendChild(row);
+        });
+    }
+    
+    leaderboardTable.appendChild(tableBody);
+    leaderboardContainer.appendChild(leaderboardTable);
+    
+    // Create restart button
+    const restartButton = document.createElement('button');
+    restartButton.textContent = 'NEW GAME';
+    restartButton.style.padding = '12px 25px';
+    restartButton.style.borderRadius = '12px';
+    restartButton.style.border = '2px solid #00fff7';
+    restartButton.style.background = 'rgba(35, 25, 66, 0.9)';
+    restartButton.style.color = '#00fff7';
+    restartButton.style.fontSize = '18px';
+    restartButton.style.fontFamily = 'Orbitron, Arial, sans-serif';
+    restartButton.style.cursor = 'pointer';
+    restartButton.style.boxShadow = '0 0 10px #9d00ff';
+    restartButton.style.textShadow = 'none';
+    restartButton.style.marginTop = '15px';
+    restartButton.style.outline = 'none';
+    restartButton.style.display = 'block';
+    restartButton.style.marginLeft = 'auto';
+    restartButton.style.marginRight = 'auto';
+    
+    // Add hover effect
+    restartButton.onmouseover = function() {
+        this.style.background = 'rgba(55, 40, 90, 0.9)';
+        this.style.boxShadow = '0 0 15px #00fff7';
+    };
+    restartButton.onmouseout = function() {
+        this.style.background = 'rgba(35, 25, 66, 0.9)';
+        this.style.boxShadow = '0 0 10px #9d00ff';
+    };
+    
+    restartButton.onclick = function(event) {
+        // Prevent default behavior
+        event.preventDefault();
+        
+        // Disable the button to prevent multiple clicks
+        restartButton.disabled = true;
+        
+        // Apply fade-out transition to the dialog
+        gameDialog.classList.remove('dialog-fade-in');
+        gameDialog.classList.add('dialog-fade-out');
+        
+        // Start the transition sequence
+        startGameTransition(gameDialog);
+    };
+    
+    // Assemble dialog
+    gameDialog.appendChild(title);
+    gameDialog.appendChild(statsContainer);
+    gameDialog.appendChild(leaderboardTitle);
+    gameDialog.appendChild(leaderboardContainer);
+    gameDialog.appendChild(restartButton);
+    
+    // Add to document - add to game container instead of body for proper positioning
+    const gameContainer = document.getElementById('game');
+    if (gameContainer) {
+        gameContainer.appendChild(gameDialog);
+    } else {
+        document.body.appendChild(gameDialog); // Fallback to body if game container not found
+    }
+    
+    // Also update the main leaderboard
+    updateLeaderboardDisplay();
+    
+    // Force dialog styles after it's in the DOM and fade in over 0.5 seconds
+    setTimeout(() => {
+        // Use our utility function to enforce styling
+        enforceDialogStyling(gameDialog);
+        
+        // Start with opacity 0 and prepare for fade-in
+        gameDialog.classList.add('dialog-fade-out');
+        
+        // Trigger fade-in animation after ensuring styling
+        setTimeout(() => {
+            gameDialog.classList.remove('dialog-fade-out');
+            gameDialog.classList.add('dialog-fade-in');
+            
+            // Final check to ensure dialog is visible
+            gameDialog.style.display = 'block';
+            gameDialog.style.visibility = 'visible';
+            gameDialog.style.opacity = '1';
+        }, 50);
+    }, 50);
+}
+
+function formatTime(ms) {
+    let milliseconds = ms % 1000;
+    let totalSeconds = Math.floor(ms / 1000);
+    let minutes = Math.floor(totalSeconds / 60);
+    let seconds = totalSeconds % 60;
+    let smoothDecimals = (milliseconds / 1000).toFixed(2).substring(2);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${smoothDecimals}`;
+}
+
+function updateTimer() {
+    // Only update if game is still active and lastUpdateTime is valid
+    if (gameStarted && lastUpdateTime && !gameWon) {
+        let currentTime = Date.now();
+        let elapsedTime = currentTime - startTime;
+        
+        // Add to the total time (which persists across rounds)
+        totalTime += currentTime - lastUpdateTime;
+        lastUpdateTime = currentTime;
+        
+        // Format and display the total time
+        let timeStr = formatTime(totalTime);
+        document.querySelector('#timer .time-value').textContent = timeStr;
+    }
+}
+
+// Add a resetRound function that preserves timer
+function resetRound() {
+    // Disable buttons immediately to prevent double clicks
+    let resetButton = document.getElementById('resetButton');
+    let quitButton = document.getElementById('quitButton');
+    
+    if (resetButton && quitButton) {
+        resetButton.style.pointerEvents = 'none';
+        quitButton.style.pointerEvents = 'none';
+    }
+    
+    // Restore canvas styling from winning state if needed
+    // No need to restore borders since we're not modifying them
+    
+    // Keep the timer running but reset other game state
+    // Don't reset startTime and totalTime to preserve timer
+    
+    // Reset disk arrangement
+    for (let i = 0; i < 3; i++) {
+        poles[i] = [];
+    }
+    for (let i = diskCount; i > 0; i--) {
+        poles[0].push(i);
+    }
+    
+    // Reset moves for this round only
+    moves = 0;
+    document.querySelector('#moves span:last-child').textContent = '0';
+    
+    // Don't reset gameStarted if timer is already running
+    if (!gameStarted && startTime !== null) {
+        gameStarted = true;
+        
+        // Restart timer interval if needed
+        if (!timerInterval) {
+            lastUpdateTime = Date.now();
+            timerInterval = setInterval(updateTimer, 10);
+        }
+    }
+    
+    // Reset win state if needed
+    gameWon = false;
+    
+    // Remove winning animation if present
+    let canvas = document.querySelector('canvas');
+    canvas.classList.remove('won');
+    
+    // Remove next round button if present
+    let nextRoundBtn = document.getElementById('nextRoundBtn');
+    if (nextRoundBtn) {
+        nextRoundBtn.remove();
+    }
+    
+    // Make sure buttons are visible if game had already started
+    if (gameStarted) {
+        let resetButton = document.getElementById('resetButton');
+        let quitButton = document.getElementById('quitButton');
+        
+        resetButton.style.opacity = '1';
+        quitButton.style.opacity = '1';
+        resetButton.style.pointerEvents = 'auto';
+        quitButton.style.pointerEvents = 'auto';
+    }
+}
+
+// Modify setupButtons to be more robust
+function setupButtons() {
+    const resetButton = document.getElementById('resetButton');
+    const quitButton = document.getElementById('quitButton');
+    
+    if (resetButton) {
+        // Clear any existing click handlers and add new one
+        resetButton.onclick = null;
+        resetButton.onclick = function(event) {
+            event.preventDefault(); // Prevent any default behavior
+            resetRound();
+        };
+        
+        // Add hover effects for reset button
+        resetButton.onmouseover = function() {
+            this.style.boxShadow = '0 0 45px #9d00ff';
+        };
+        resetButton.onmouseout = function() {
+            this.style.boxShadow = '0 0 10px #9d00ff';
+        };
+    }
+    
+    if (quitButton) {
+        // Clear any existing click handlers and add new one
+        quitButton.onclick = null;
+        quitButton.onclick = function(event) {
+            event.preventDefault(); // Prevent any default behavior
+            quitGame();
+        };
+        
+        // Add hover effects for quit button
+        quitButton.onmouseover = function() {
+            this.style.boxShadow = '0 0 45px #ff2fd6';
+        };
+        quitButton.onmouseout = function() {
+            this.style.boxShadow = '0 0 10px #9d00ff';
+        };
+    }
+}
+
+// Also call setupButtons in the window load event
+window.addEventListener('load', function() {
+    // Connect the reset button to our new resetRound function
+    const resetButton = document.getElementById('resetButton');
+    const quitButton = document.getElementById('quitButton');
+    
+    // Apply styles to existing buttons
+    if (resetButton) {
+        // Apply styles without event listeners (we'll use onclick instead)
+        resetButton.style.borderRadius = '12px';
+        resetButton.style.border = '2px solid #00fff7';
+        resetButton.style.background = 'rgba(35, 25, 66, 0.9)';
+        resetButton.style.color = '#00fff7';
+        resetButton.style.fontFamily = 'Orbitron, Arial, sans-serif';
+        resetButton.style.padding = '8px 16px';
+        resetButton.style.fontSize = '16px';
+        resetButton.style.cursor = 'pointer';
+        resetButton.style.boxShadow = '0 0 10px #9d00ff';
+        resetButton.style.textShadow = 'none'; // Remove text shadow
+        resetButton.style.outline = 'none'; // Remove outline
+    }
+    
+    if (quitButton) {
+        // Apply styles without event listeners (we'll use onclick instead)
+        quitButton.style.borderRadius = '12px';
+        quitButton.style.border = '2px solid #ff2fd6'; // Changed to magenta
+        quitButton.style.background = 'rgba(35, 25, 66, 0.9)';
+        quitButton.style.color = '#ff2fd6'; // Changed to magenta
+        quitButton.style.fontFamily = 'Orbitron, Arial, sans-serif';
+        quitButton.style.padding = '8px 16px';
+        quitButton.style.fontSize = '16px';
+        quitButton.style.cursor = 'pointer';
+        quitButton.style.boxShadow = '0 0 10px #9d00ff';
+        quitButton.style.textShadow = 'none'; // Remove text shadow
+        quitButton.style.outline = 'none'; // Remove outline
+    }
+    
+    // Set up the button functionality
+    setupButtons();
+    
+    // Ensure canvas has border styling
+    ensureCanvasBorder();
+});
+
+// Add window resize event listener to ensure canvas border is maintained
+window.addEventListener('resize', function() {
+    // Short delay to ensure the resize is complete
+    setTimeout(ensureCanvasBorder, 100);
+    
+    // Also run removeContainerBorders to maintain border-free containers
+    removeContainerBorders();
+});
+
+function showInitialsPrompt(completionTime) {
+    // Create styled dialog for entering initials
+    const initialsDialog = document.createElement('div');
+    initialsDialog.id = 'initialsDialog';
+    
+    // Apply styling using setAttribute and class
+    initialsDialog.setAttribute('style', `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 30px;
+        border-radius: 12px;
+        border: 2px solid #00fff7 !important;
+        background-color: rgba(35, 25, 66, 0.95) !important;
+        color: #00fff7;
+        font-family: 'Orbitron', Arial, sans-serif;
+        box-shadow: 0 0 20px #9d00ff !important;
+        z-index: 1000;
+        text-align: center;
+        min-width: 320px;
+        opacity: 0;
+        transition: opacity 0.5s ease;
+    `);
+    
+    // Apply the CSS class for dialog styling
+    initialsDialog.classList.add('game-dialog-styling');
+    
+    // Create dialog content
+    const title = document.createElement('h2');
+    title.textContent = 'NEW HIGH SCORE!';
+    title.style.color = '#ff2fd6';
+    title.style.marginTop = '0';
+    title.style.fontSize = '28px';
+    
+    const subtitle = document.createElement('p');
+    subtitle.textContent = 'Enter your initials:';
+    subtitle.style.color = '#00fff7';
+    subtitle.style.fontSize = '18px';
+    
+    // Create input for initials
+    const initialsInput = document.createElement('input');
+    initialsInput.type = 'text';
+    initialsInput.maxLength = 3;
+    initialsInput.placeholder = 'AAA';
+    initialsInput.style.background = 'rgba(35, 25, 66, 0.7)';
+    initialsInput.style.border = '2px solid #9d00ff';
+    initialsInput.style.borderRadius = '6px';
+    initialsInput.style.padding = '10px';
+    initialsInput.style.fontSize = '20px';
+    initialsInput.style.color = '#00fff7';
+    initialsInput.style.textAlign = 'center';
+    initialsInput.style.width = '100px';
+    initialsInput.style.margin = '15px 0';
+    initialsInput.style.fontFamily = 'Orbitron, Arial, sans-serif';
+    initialsInput.style.outline = 'none';
+    initialsInput.style.boxShadow = '0 0 10px #9d00ff';
+    
+    // Create submit button
+    const submitButton = document.createElement('button');
+    submitButton.textContent = 'SUBMIT';
+    submitButton.style.padding = '12px 25px';
+    submitButton.style.borderRadius = '12px';
+    submitButton.style.border = '2px solid #00fff7';
+    submitButton.style.background = 'rgba(35, 25, 66, 0.9)';
+    submitButton.style.color = '#00fff7';
+    submitButton.style.fontSize = '16px';
+    submitButton.style.fontFamily = 'Orbitron, Arial, sans-serif';
+    submitButton.style.cursor = 'pointer';
+    submitButton.style.boxShadow = '0 0 10px #9d00ff';
+    submitButton.style.marginTop = '20px';
+    submitButton.style.outline = 'none';
+    submitButton.style.display = 'block';
+    submitButton.style.marginLeft = 'auto';
+    submitButton.style.marginRight = 'auto';
+    
+    // Add hover effect
+    submitButton.onmouseover = function() {
+        this.style.background = 'rgba(55, 40, 90, 0.9)';
+        this.style.boxShadow = '0 0 15px #00fff7';
+    };
+    submitButton.onmouseout = function() {
+        this.style.background = 'rgba(35, 25, 66, 0.9)';
+        this.style.boxShadow = '0 0 10px #9d00ff';
+    };
+    
+    submitButton.onclick = function() {
+        let initials = initialsInput.value.trim();
+        // Default to "AAA" if empty
+        if (initials === '') {
+            initials = 'AAA';
+        }
+        
+        // Add to leaderboard
+        addToLeaderboard(initials, completionTime);
+        
+        // Fade out dialog
+        initialsDialog.style.opacity = '0';
+        setTimeout(() => {
+            document.getElementById('game').removeChild(initialsDialog);
+            // Show completion dialog with leaderboard
+            showGameCompleteDialog();
+        }, 500);
+    };
+    
+    // Auto-focus on input
+    setTimeout(() => initialsInput.focus(), 100);
+    
+    // Initialize dialog
+    initialsDialog.appendChild(title);
+    initialsDialog.appendChild(subtitle);
+    initialsDialog.appendChild(initialsInput);
+    initialsDialog.appendChild(submitButton);
+    
+    document.getElementById('game').appendChild(initialsDialog);
+    
+    // Force dialog styles after it's in the DOM and fade in over 0.5 seconds
+    setTimeout(() => {
+        // Use our utility function to enforce styling
+        enforceDialogStyling(initialsDialog);
+        
+        // Start with opacity 0 and prepare for fade-in
+        initialsDialog.classList.add('dialog-fade-out');
+        
+        // Trigger fade-in animation after ensuring styling
+        setTimeout(() => {
+            initialsDialog.classList.remove('dialog-fade-out');
+            initialsDialog.classList.add('dialog-fade-in');
+        }, 10);
+    }, 10);
+}
+
+function showGameCompleteDialog() {
+    // Create styled in-game dialog
+    const gameDialog = document.createElement('div');
+    gameDialog.id = 'gameCompleteDialog';
+    
+    // Apply styling using setAttribute and class
+    gameDialog.setAttribute('style', `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 30px;
+        border-radius: 12px;
+        border: 2px solid #00fff7 !important;
+        background-color: rgba(35, 25, 66, 0.95) !important;
+        color: #00fff7;
+        font-family: 'Orbitron', Arial, sans-serif;
+        box-shadow: 0 0 20px #9d00ff !important;
+        z-index: 1000;
+        text-align: center;
+        min-width: 350px;
+        max-width: 450px;
+        opacity: 0;
+        transition: opacity 0.5s ease;
+    `);
+    
+    // Apply the CSS class for dialog styling
+    gameDialog.classList.add('game-dialog-styling');
+    
+    // Create dialog content
+    const title = document.createElement('h2');
+    title.textContent = 'GAME COMPLETE!';
+    title.style.color = '#ff2fd6';
+    title.style.marginTop = '0';
+    title.style.fontSize = '28px';
+    
+    const statsContainer = document.createElement('div');
+    statsContainer.style.margin = '20px 0';
+    statsContainer.style.textAlign = 'left';
+    
+    const createStatRow = (label, value) => {
+        const row = document.createElement('div');
+        row.style.margin = '12px 0';
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = label;
+        labelSpan.style.color = '#ff2fd6';
+        
+        const valueSpan = document.createElement('span');
+        valueSpan.textContent = value;
+        valueSpan.style.color = '#00fff7';
+        
+        row.appendChild(labelSpan);
+        row.appendChild(valueSpan);
+        return row;
+    };
+    
+    // Add game stats
+    statsContainer.appendChild(createStatRow('Total Rounds:', MAX_ROUNDS));
+    statsContainer.appendChild(createStatRow('Total Moves:', totalMoves));
+    statsContainer.appendChild(createStatRow('Total Time:', formatTime(totalTime)));
+
+    // Add leaderboard section title
+    const leaderboardTitle = document.createElement('h3');
+    leaderboardTitle.textContent = 'LEADERBOARD';
+    leaderboardTitle.style.color = '#ff2fd6';
+    leaderboardTitle.style.marginTop = '25px';
+    leaderboardTitle.style.fontSize = '20px';
+    
+    // Add leaderboard table
+    const leaderboardContainer = document.createElement('div');
+    leaderboardContainer.style.maxHeight = '150px';
+    leaderboardContainer.style.overflowY = 'auto';
+    leaderboardContainer.style.margin = '15px 0';
+    leaderboardContainer.style.padding = '0 10px';
+    
+    const leaderboardTable = document.createElement('table');
+    leaderboardTable.style.width = '100%';
+    leaderboardTable.style.borderCollapse = 'collapse';
+    leaderboardTable.style.fontVariantNumeric = 'tabular-nums';
+    
+    // Add table header
+    const tableHeader = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    
+    const rankHeader = document.createElement('th');
+    rankHeader.textContent = 'RANK';
+    rankHeader.style.color = '#9d00ff';
+    rankHeader.style.padding = '8px';
+    
+    const playerHeader = document.createElement('th');
+    playerHeader.textContent = 'PLAYER';
+    playerHeader.style.color = '#9d00ff';
+    playerHeader.style.padding = '8px';
+    
+    const timeHeader = document.createElement('th');
+    timeHeader.textContent = 'TIME';
+    timeHeader.style.color = '#9d00ff';
+    timeHeader.style.padding = '8px';
+    
+    const movesHeader = document.createElement('th');
+    movesHeader.textContent = 'MOVES';
+    movesHeader.style.color = '#9d00ff';
+    movesHeader.style.padding = '8px';
+    
+    headerRow.appendChild(rankHeader);
+    headerRow.appendChild(playerHeader);
+    headerRow.appendChild(timeHeader);
+    headerRow.appendChild(movesHeader);
+    tableHeader.appendChild(headerRow);
+    leaderboardTable.appendChild(tableHeader);
+    
+    // Add table body
+    const tableBody = document.createElement('tbody');
+    
+    // Check if leaderboard is empty
+    if (leaderboard.length === 0) {
+        const emptyRow = document.createElement('tr');
+        const emptyCell = document.createElement('td');
+        emptyCell.colSpan = 4; // Updated to span 4 columns
+        emptyCell.textContent = 'No records yet!';
+        emptyCell.style.padding = '15px 0';
+        emptyCell.style.color = '#00fff7';
+        emptyRow.appendChild(emptyCell);
+        tableBody.appendChild(emptyRow);
+    } else {
+        // Populate with leaderboard data
+        leaderboard.forEach((entry, index) => {
+            const row = document.createElement('tr');
+            
+            const rankCell = document.createElement('td');
+            rankCell.textContent = index + 1;
+            rankCell.style.padding = '8px';
+            rankCell.style.color = '#00fff7';
+            
+            const playerCell = document.createElement('td');
+            playerCell.textContent = entry.player;
+            playerCell.style.padding = '8px';
+            playerCell.style.color = '#00fff7';
+            
+            const timeCell = document.createElement('td');
+            timeCell.textContent = formatTime(entry.time);
+            timeCell.style.padding = '8px';
+            timeCell.style.color = '#00fff7';
+            
+            const movesCell = document.createElement('td');
+            movesCell.textContent = entry.moves || '-';
+            movesCell.style.padding = '8px';
+            movesCell.style.color = '#00fff7';
+            
+            row.appendChild(rankCell);
+            row.appendChild(playerCell);
+            row.appendChild(timeCell);
+            row.appendChild(movesCell);
+            
+            // Highlight current score if it exists in the leaderboard
+            if (entry.time === totalTime && entry.moves === totalMoves) {
+                row.style.backgroundColor = 'rgba(157, 0, 255, 0.3)';
+                row.style.borderRadius = '4px';
+            }
+            
+            tableBody.appendChild(row);
+        });
+    }
+    
+    leaderboardTable.appendChild(tableBody);
+    leaderboardContainer.appendChild(leaderboardTable);
+    
+    // Create restart button
+    const restartButton = document.createElement('button');
+    restartButton.textContent = 'PLAY AGAIN';
+    restartButton.style.padding = '12px 25px';
+    restartButton.style.borderRadius = '12px';
+    restartButton.style.border = '2px solid #00fff7';
+    restartButton.style.background = 'rgba(35, 25, 66, 0.9)';
+    restartButton.style.color = '#00fff7';
+    restartButton.style.fontSize = '18px';
+    restartButton.style.fontFamily = 'Orbitron, Arial, sans-serif';
+    restartButton.style.cursor = 'pointer';
+    restartButton.style.boxShadow = '0 0 10px #9d00ff';
+    restartButton.style.marginTop = '20px';
+    restartButton.style.outline = 'none';
+    restartButton.style.display = 'block';
+    restartButton.style.marginLeft = 'auto';
+    restartButton.style.marginRight = 'auto';
+    
+    // Add hover effect
+    restartButton.onmouseover = function() {
+        this.style.background = 'rgba(55, 40, 90, 0.9)';
+        this.style.boxShadow = '0 0 15px #00fff7';
+    };
+    restartButton.onmouseout = function() {
+        this.style.background = 'rgba(35, 25, 66, 0.9)';
+        this.style.boxShadow = '0 0 10px #9d00ff';
+    };
+    
+    // Add click handler to restart the game
+    restartButton.onclick = function(event) {
+        // Prevent default behavior
+        event.preventDefault();
+        
+        // Disable the button to prevent multiple clicks
+        restartButton.disabled = true;
+        
+        // Apply fade-out transition to the dialog
+        gameDialog.classList.remove('dialog-fade-in');
+        gameDialog.classList.add('dialog-fade-out');
+        
+        // Start the transition sequence
+        startGameTransition(gameDialog);
+    };
+    
+    // Assemble dialog
+    gameDialog.appendChild(title);
+    gameDialog.appendChild(statsContainer);
+    gameDialog.appendChild(leaderboardTitle);
+    gameDialog.appendChild(leaderboardContainer);
+    gameDialog.appendChild(restartButton);
+    
+    // Add to document
+    document.getElementById('game').appendChild(gameDialog);
+    
+    // Also update the leaderboard in the main interface
+    updateLeaderboardDisplay();
+    
+    // Force dialog styles after it's in the DOM and fade in over 0.5 seconds
+    setTimeout(() => {
+        // Use our utility function to enforce styling
+        enforceDialogStyling(gameDialog);
+        
+        // Start with opacity 0 and prepare for fade-in
+        gameDialog.classList.add('dialog-fade-out');
+        
+        // Trigger fade-in animation after ensuring styling
+        setTimeout(() => {
+            gameDialog.classList.remove('dialog-fade-out');
+            gameDialog.classList.add('dialog-fade-in');
+        }, 10);
+    }, 10);
+}
+
+// Update the resetGameWithTransition function to be more efficient
+function resetGameWithTransition(dialogToRemove, existingOverlay = null) {
+    // Use existing overlay if provided, otherwise create a new one
+    let fadeOverlay = existingOverlay;
+    if (!fadeOverlay) {
+        fadeOverlay = document.createElement('div');
+        fadeOverlay.classList.add('fade-transition-overlay');
+        document.getElementById('game').appendChild(fadeOverlay);
+        
+        // First remove the dialog if it exists
+        if (dialogToRemove && document.getElementById('game').contains(dialogToRemove)) {
+            document.getElementById('game').removeChild(dialogToRemove);
+        }
+        
+        // Fade in the overlay - faster transition
+        setTimeout(() => {
+            fadeOverlay.style.opacity = '1';
+            fadeOverlay.classList.add('fade-transition-active');
+        }, 50); // Reduced from 100ms
+    }
+    
+    // Reset game state immediately - don't wait for animations
+    resetGameState();
+    
+    // Now fade out the overlay to reveal the new game - with shorter delay
+    setTimeout(() => {
+        fadeOverlay.style.opacity = '0';
+        fadeOverlay.classList.remove('fade-transition-active');
+        // Remove overlay after transition completes
+        setTimeout(() => {
+            if (document.getElementById('game').contains(fadeOverlay)) {
+                document.getElementById('game').removeChild(fadeOverlay);
+            }
+        }, 700); // Reduced from 1500ms
+    }, 500); // Reduced from 1000ms
+}
+
+// Extract game state reset logic to a separate function for better organization
+function resetGameState() {
+    // Reset game state completely
+    poles = [];
+    diskCount = 3;
+    moves = 0;
+    totalMoves = 0;
+    
+    // Make sure timer is completely reset
+    startTime = null;
+    totalTime = 0;
+    lastUpdateTime = null;
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+    
+    // Reset timer display explicitly
+    document.querySelector('#timer .time-value').textContent = '0:00.00';
+    
+    gameStarted = false;
+    gameWon = false;  // Ensure win state is reset
+    roundNumber = 1;
+    
+    // Reset display
+    document.querySelector('#moves span:last-child').textContent = '0';
+    document.querySelector('#round span:last-child').textContent = '1';
+    document.getElementById('diskCount').value = '3';
+    document.getElementById('minMoves').setAttribute('data-value', '7');
+    
+    // Keep reset and quit buttons hidden until first move
+    let resetButton = document.getElementById('resetButton');
+    let quitButton = document.getElementById('quitButton');
+    
+    // Make sure the buttons are hidden but can receive clicks when needed
+    resetButton.style.opacity = '0';
+    quitButton.style.opacity = '0';
+    resetButton.style.pointerEvents = 'auto';
+    quitButton.style.pointerEvents = 'auto';
+    
+    // Ensure button fade-in effect is set properly for when the player makes first move
+    resetButton.style.transition = 'opacity 1s ease';
+    quitButton.style.transition = 'opacity 1s ease';
+    
+    // Redraw the canvas
+    initializeGame();
+}
+
+// Optimize the startGameTransition function for quicker transitions
+function startGameTransition(dialogToRemove) {
+    // Create a fade overlay for transition effect
+    const fadeOverlay = document.createElement('div');
+    fadeOverlay.classList.add('fade-transition-overlay');
+    document.getElementById('game').appendChild(fadeOverlay);
+    
+    // Wait for dialog fade-out to complete - shorter timeout
+    setTimeout(() => {
+        // Remove dialog if it exists
+        if (dialogToRemove && document.getElementById('game').contains(dialogToRemove)) {
+            document.getElementById('game').removeChild(dialogToRemove);
+        }
+        
+        // Start the overlay fade-in
+        fadeOverlay.style.opacity = '1';
+        fadeOverlay.classList.add('fade-transition-active');
+        
+        // Reset the game after transition - shorter timeout
+        setTimeout(() => {
+            resetGameWithTransition(null, fadeOverlay);
+        }, 300); // Reduced from 800ms
+    }, 300); // Reduced from 500ms
+} 
