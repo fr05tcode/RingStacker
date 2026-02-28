@@ -202,6 +202,7 @@ label {
     gap: 8px;
     justify-content: center;
     align-items: center;
+    pointer-events: none;
 }
 
 .instruction-line {
@@ -276,7 +277,7 @@ label {
     background: none !important;
 }
 
-.p5Canvas, defaultCanvas0 {
+.p5Canvas, #defaultCanvas0 {
     margin: 20px 0 40px 0 !important;
     display: block !important;
     border: 2px solid #00fff7 !important;

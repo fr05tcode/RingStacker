@@ -69,6 +69,10 @@ export class GameState {
         const disk = this.poles[lastMove.toPole].pop();
 
         if (disk !== lastMove.disk) {
+            if (disk !== undefined) {
+                this.poles[lastMove.toPole].push(disk);
+            }
+            this.moveHistory.push(lastMove);
             return false;
         }
 

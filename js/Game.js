@@ -151,6 +151,7 @@ export class Game {
     }
 
     resetRound() {
+        this.gameCompleted = false;
         this.state.reset();
         this.uiManager.updateStats();
         this.uiManager.setTimerDisplay(0);
@@ -161,6 +162,7 @@ export class Game {
             return;
         }
 
+        this.gameCompleted = false;
         this.state.roundNumber = diskCount - 2;
         this.state.diskCount = diskCount;
         this.state.reset();
