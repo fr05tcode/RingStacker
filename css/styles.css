@@ -219,13 +219,19 @@ label {
     cursor: pointer;
     text-shadow: 0 0 2px #ff2fd6;
     transition: all 0.3s ease;
-    opacity: 0;
-    pointer-events: none;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 #resetButton {
     border: 2px solid #00fff7;
     color: #00fff7;
+    box-shadow: 0 0 15px #9d00ff;
+}
+
+#undoButton {
+    border: 2px solid #ffe600;
+    color: #ffe600;
     box-shadow: 0 0 15px #9d00ff;
 }
 
@@ -242,6 +248,10 @@ label {
 
 #resetButton:hover {
     box-shadow: 0 0 45px #9d00ff;
+}
+
+#undoButton:hover {
+    box-shadow: 0 0 45px #ffe600;
 }
 
 #quitButton:hover {
