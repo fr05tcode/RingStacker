@@ -182,15 +182,10 @@ label {
     margin-bottom: 30px;
     justify-content: center;
     width: 100%;
-    position: relative;
     height: 40px;
 }
 
 #instructionText {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
     text-align: center;
     color: #00fff7;
     font-size: 16px;
@@ -202,6 +197,7 @@ label {
     gap: 8px;
     justify-content: center;
     align-items: center;
+    margin-bottom: 12px;
 }
 
 .instruction-line {
@@ -219,13 +215,19 @@ label {
     cursor: pointer;
     text-shadow: 0 0 2px #ff2fd6;
     transition: all 0.3s ease;
-    opacity: 0;
-    pointer-events: none;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 #resetButton {
     border: 2px solid #00fff7;
     color: #00fff7;
+    box-shadow: 0 0 15px #9d00ff;
+}
+
+#undoButton {
+    border: 2px solid #ffe600;
+    color: #ffe600;
     box-shadow: 0 0 15px #9d00ff;
 }
 
@@ -242,6 +244,10 @@ label {
 
 #resetButton:hover {
     box-shadow: 0 0 45px #9d00ff;
+}
+
+#undoButton:hover {
+    box-shadow: 0 0 45px #ffe600;
 }
 
 #quitButton:hover {
@@ -266,7 +272,7 @@ label {
     background: none !important;
 }
 
-.p5Canvas, defaultCanvas0 {
+.p5Canvas, #defaultCanvas0 {
     margin: 20px 0 40px 0 !important;
     display: block !important;
     border: 2px solid #00fff7 !important;

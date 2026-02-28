@@ -1,11 +1,12 @@
 import { CONFIG } from './config.js';
 
 export class UIManager {
-    constructor(gameState) {
+    constructor(gameState, handlers = {}) {
         this.gameState = gameState;
+        this.handlers = handlers;
+        this.dialogObserver = null;
+
         this.setupEventListeners();
-        this.borderWatcherInterval = null;
-        this.setupBorderWatcher();
         this.setupDialogStyleObserver();
     }
 
@@ -13,6 +14,7 @@ export class UIManager {
         document.getElementById('resetButton').addEventListener('click', () => this.resetRound());
         document.getElementById('quitButton').addEventListener('click', () => this.quitGame());
         document.getElementById('diskCount').addEventListener('change', (e) => this.changeDiskCount(e.target.value));
+        document.getElementById('undoButton').addEventListener('click', () => this.undoMove());
     }
 
     updateStats() {
@@ -23,126 +25,119 @@ export class UIManager {
 
     updateTimer() {
         if (!this.gameState.gameStarted) return;
-        
+
         const elapsed = this.gameState.getElapsedTime();
-        const minutes = Math.floor(elapsed / 60000);
-        const seconds = ((elapsed % 60000) / 1000).toFixed(2);
-        document.querySelector('#timer .time-value').textContent = 
-            `${minutes}:${seconds.padStart(5, '0')}`;
+        this.setTimerDisplay(elapsed);
+    }
+
+    setTimerDisplay(ms) {
+        document.querySelector('#timer .time-value').textContent = this.formatTime(ms);
     }
 
     showIllegalMoveWarning() {
         const warning = document.getElementById('illegalMoveWarning');
         warning.style.opacity = '1';
-        
+
         if (this.gameState.warningTimeout) {
             clearTimeout(this.gameState.warningTimeout);
         }
-        
+
         this.gameState.warningTimeout = setTimeout(() => {
             warning.style.opacity = '0';
         }, 1000);
     }
 
-    setupBorderWatcher() {
-        const checkAndRemoveBorders = () => {
-            const activeDialogs = document.querySelectorAll('[data-dialog-type="game-dialog"]');
-            const hasActiveDialog = activeDialogs.length > 0;
-            
-            document.querySelectorAll('*').forEach(el => {
-                if (this.shouldSkipBorderRemoval(el)) return;
-                
-                const rect = el.getBoundingClientRect();
-                const isAtEdge = this.isElementAtEdge(rect);
-                
-                if (isAtEdge) {
-                    this.removeBorders(el);
-                }
-            });
-            
-            this.enforceCanvasBorder();
-            
-            if (hasActiveDialog) {
-                activeDialogs.forEach(dialog => this.enforceDialogStyling(dialog));
-            }
-        };
-        
-        checkAndRemoveBorders();
-        this.borderWatcherInterval = setInterval(checkAndRemoveBorders, 1000);
+    resetRound() {
+        if (typeof this.handlers.onResetRound === 'function') {
+            this.handlers.onResetRound();
+        }
     }
 
-    shouldSkipBorderRemoval(element) {
-        const skipElements = ['canvas', 'button', '.game-button', '#nextRoundBtn', 
-                            '#gameDialog', '#initialsDialog', '#gameCompleteDialog', '.leaderboard'];
-        
-        return skipElements.some(selector => {
-            if (selector.startsWith('.')) {
-                return element.classList.contains(selector.slice(1));
-            } else if (selector.startsWith('#')) {
-                return element.id === selector.slice(1);
-            }
-            return element.tagName.toLowerCase() === selector;
-        });
+    quitGame() {
+        if (typeof this.handlers.onQuitGame === 'function') {
+            this.handlers.onQuitGame();
+        }
     }
 
-    isElementAtEdge(rect) {
-        return (
-            rect.left <= 5 || 
-            rect.top <= 5 || 
-            rect.right >= window.innerWidth - 5 || 
-            rect.bottom >= window.innerHeight - 5
-        );
+    changeDiskCount(value) {
+        if (typeof this.handlers.onChangeDiskCount === 'function') {
+            this.handlers.onChangeDiskCount(Number(value));
+        }
     }
 
-    removeBorders(element) {
-        element.style.border = 'none';
-        element.style.borderWidth = '0';
-        element.style.boxShadow = 'none';
-        element.style.outline = 'none';
-    }
-
-    enforceCanvasBorder() {
-        const canvas = document.querySelector('canvas');
-        if (canvas) {
-            canvas.style.border = '3px solid ' + CONFIG.COLORS.NEON[0];
-            canvas.style.borderRadius = '12px';
-            canvas.style.boxShadow = '0 0 30px ' + CONFIG.COLORS.NEON[2];
+    undoMove() {
+        if (typeof this.handlers.onUndoMove === 'function') {
+            this.handlers.onUndoMove();
         }
     }
 
     enforceDialogStyling(dialog) {
-        Object.assign(dialog.style, {
-            border: `3px solid ${CONFIG.COLORS.NEON[0]} !important`,
-            backgroundColor: 'rgba(35, 25, 66, 0.95) !important',
-            boxShadow: `0 0 30px ${CONFIG.COLORS.NEON[2]} !important`,
-            color: CONFIG.COLORS.NEON[0],
-            borderRadius: '12px',
-            position: 'absolute',
-            zIndex: '2500',
-            display: 'block',
-            visibility: 'visible'
-        });
+        dialog.classList.add('game-dialog-styling');
     }
 
     setupDialogStyleObserver() {
-        const observer = new MutationObserver(() => {
+        this.dialogObserver = new MutationObserver(() => {
             document.querySelectorAll('[data-dialog-type="game-dialog"]')
                 .forEach(dialog => this.enforceDialogStyling(dialog));
         });
 
-        observer.observe(document.body, {
+        this.dialogObserver.observe(document.body, {
             childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ['style', 'class']
+            subtree: true
         });
     }
 
+    showInitialsPrompt(onSubmit) {
+        const existingDialog = document.getElementById('initialsDialog');
+        if (existingDialog) {
+            existingDialog.remove();
+        }
+
+        const dialog = document.createElement('div');
+        dialog.setAttribute('data-dialog-type', 'game-dialog');
+        dialog.id = 'initialsDialog';
+
+        dialog.innerHTML = `
+            <h2>New High Score!</h2>
+            <p>Enter your initials (3 characters):</p>
+            <input id="initialsInput" type="text" maxlength="3" style="text-transform: uppercase">
+            <button id="submitInitialsButton" type="button">Submit</button>
+        `;
+
+        document.body.appendChild(dialog);
+        this.enforceDialogStyling(dialog);
+
+        const input = dialog.querySelector('#initialsInput');
+        const submitButton = dialog.querySelector('#submitInitialsButton');
+
+        const submitInitials = () => {
+            const initials = input.value.trim().toUpperCase();
+            if (/^[A-Z0-9]{3}$/.test(initials)) {
+                onSubmit(initials);
+                dialog.remove();
+            }
+        };
+
+        submitButton.addEventListener('click', submitInitials);
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                submitInitials();
+            }
+        });
+
+        input.focus();
+    }
+
     showGameCompleteDialog() {
+        const existingDialog = document.getElementById('gameCompleteDialog');
+        if (existingDialog) {
+            existingDialog.remove();
+        }
+
         const dialog = document.createElement('div');
         dialog.setAttribute('data-dialog-type', 'game-dialog');
         dialog.id = 'gameCompleteDialog';
-        
+
         const content = `
             <h2>Congratulations!</h2>
             <p>You've completed all ${CONFIG.GAME.MAX_ROUNDS} rounds!</p>
@@ -150,12 +145,19 @@ export class UIManager {
                 <p>Total Time: ${this.formatTime(this.gameState.totalTime)}</p>
                 <p>Total Moves: ${this.gameState.totalMoves}</p>
             </div>
-            <button onclick="resetGame()">Play Again</button>
+            <button id="playAgainButton" type="button">Play Again</button>
         `;
-        
+
         dialog.innerHTML = content;
         document.body.appendChild(dialog);
         this.enforceDialogStyling(dialog);
+
+        dialog.querySelector('#playAgainButton').addEventListener('click', () => {
+            if (typeof this.handlers.onResetGame === 'function') {
+                this.handlers.onResetGame();
+            }
+            dialog.remove();
+        });
     }
 
     formatTime(ms) {
@@ -165,8 +167,9 @@ export class UIManager {
     }
 
     cleanup() {
-        if (this.borderWatcherInterval) {
-            clearInterval(this.borderWatcherInterval);
+        if (this.dialogObserver) {
+            this.dialogObserver.disconnect();
+            this.dialogObserver = null;
         }
     }
-} 
+}

@@ -25,6 +25,13 @@ export class Leaderboard {
         localStorage.setItem(CONFIG.STORAGE_KEYS.LEADERBOARD, JSON.stringify(this.scores));
     }
 
+    compareScores(a, b) {
+        if (a.time !== b.time) return a.time - b.time;
+        const aMoves = typeof a.moves === 'number' ? a.moves : Number.MAX_SAFE_INTEGER;
+        const bMoves = typeof b.moves === 'number' ? b.moves : Number.MAX_SAFE_INTEGER;
+        return aMoves - bMoves;
+    }
+
     addScore(initials, time, moves) {
         const entry = {
             player: initials.toUpperCase(),
@@ -33,7 +40,7 @@ export class Leaderboard {
         };
         
         this.scores.push(entry);
-        this.scores.sort((a, b) => a.time - b.time);
+        this.scores.sort((a, b) => this.compareScores(a, b));
         
         if (this.scores.length > CONFIG.GAME.MAX_LEADERBOARD_ENTRIES) {
             this.scores = this.scores.slice(0, CONFIG.GAME.MAX_LEADERBOARD_ENTRIES);
@@ -42,11 +49,13 @@ export class Leaderboard {
         this.save();
     }
 
-    isQualifyingScore(time) {
+    isQualifyingScore(time, moves) {
         if (this.scores.length < CONFIG.GAME.MAX_LEADERBOARD_ENTRIES) {
             return true;
         }
-        return time < this.scores[this.scores.length - 1].time;
+
+        const cutoff = this.scores[this.scores.length - 1];
+        return this.compareScores({ time, moves }, cutoff) < 0;
     }
 
     formatTime(ms) {
