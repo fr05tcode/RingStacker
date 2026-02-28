@@ -1,4 +1,4 @@
-# RingStacker v4.9
+# RingStacker v6.0.0
 
 A modern implementation of the classic Tower of Hanoi puzzle game with a synthwave aesthetic.
 
@@ -22,7 +22,7 @@ A modern implementation of the classic Tower of Hanoi puzzle game with a synthwa
 ## Project Structure
 
 ```
-RingStacker_v4.9/
+RingStacker_v6.0.0/
 ├── index.html           # Main HTML file
 ├── css/
 │   └── styles.css      # All game styles
